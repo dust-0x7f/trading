@@ -1,29 +1,26 @@
 import os
+from datetime import datetime, timedelta
 
+import pandas as pd
 import requests
+from pandas import DataFrame
 
 from constants.constants import TimePeriodEnum, SymbolEnum
-import pandas as pd
+from data.indicators import compute_rsi
 
 # 设置全局列名变量
-COLUMNS = ['timestamp', 'open', 'high', 'low', 'close', 'volume',
-           'close_timestamp', 'close_volume', 'trade_count',
-           'buy_volume', 'sell_volume', 'unknown']
-
-
+Spot_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_timestamp', 'close_volume', 'trade_count',
+                'buy_volume', 'sell_volume', 'ignore']
 
 request_url = "https://data.binance.vision/data/spot/daily/klines/{symbol}/{period}/{symbol}-{period}-{year}-{month}-{day}.zip"
 file_name_template = "./zips/{symbol}-{period}-{year}-{month}-{day}.zip"
 
-
 '''
 下载现货k线图
 '''
-def download_spot_klines(symbol: SymbolEnum, period: TimePeriodEnum, year, month, day):
-    # 格式化月份和日期，确保它们是两位数
-    month = f'{month:02d}'
-    day = f'{day:02d}'
 
+
+def download_spot_klines(symbol: SymbolEnum, period: TimePeriodEnum, year: int, month: str, day: str) -> str:
     # 格式化 request_url 和 file_name_template
     url = request_url.format(symbol=symbol.value, period=period.value, year=year, month=month, day=day)
     file_name = file_name_template.format(symbol=symbol.value, period=period.value, year=year, month=month, day=day)
@@ -37,12 +34,9 @@ def download_spot_klines(symbol: SymbolEnum, period: TimePeriodEnum, year, month
 
     # 判断文件是否已经存在
     if os.path.exists(file_name):
-        print(f"File {file_name} already exists. Skipping download.")
+        pass
     else:
         # 打印 URL 和文件名（你也可以执行下载操作）
-        print(f"URL: {url}")
-        print(f"File Name: {file_name}")
-
         # 请求数据
         response = requests.get(url)
         if response.status_code == 200:
@@ -51,23 +45,52 @@ def download_spot_klines(symbol: SymbolEnum, period: TimePeriodEnum, year, month
             print(f"File {file_name} downloaded successfully!")
         else:
             print(f"Failed to download file: {response.status_code}")
+            raise Exception(f"download file {file_name} fail")
+    return file_path
 
-    # 读取并处理数据
-    read_spot_kines(file_name)
 
 '''
 读取下载现货的k线图
 '''
-def read_spot_kines(file_name:str):
+
+
+def read_spot_kines(file_path_name: str) -> DataFrame:
     # 读取CSV数据
-    df = pd.read_csv(file_name, header=None)
+    df = pd.read_csv(file_path_name, header=None)
 
-    # 设置列名
-    df.columns = COLUMNS
+    return df
 
-    # 输出DataFrame
-    print(df)
+
+def get_day_df(symbol: SymbolEnum, period: TimePeriodEnum, time_end: str, window_size=30) -> DataFrame:
+    start_date = datetime.strptime(time_end, '%Y-%m-%d')
+    all_data = []
+
+    for i in range(window_size):
+        day = start_date - timedelta(days=i)
+        year = day.year
+        month = day.month
+        day_of_month = day.day
+
+        # 下载该天的数据
+        try:
+            file_name = download_spot_klines(symbol, period, year, f'{month:02d}', f'{day_of_month:02d}')
+            df = read_spot_kines(file_name)
+            all_data.append(df)
+        except Exception as e:
+            raise e
+    res = pd.concat(all_data, ignore_index=True)
+    res.columns = Spot_columns
+    return res
+
+
+def data_clean(df: DataFrame) -> DataFrame:
+    return df.dropna()
+
 
 
 if __name__ == '__main__':
-    download_spot_klines(SymbolEnum.DOGEUSDT,TimePeriodEnum.FIFTEEN_MINUTES,2025,2,1)
+    df = get_day_df(SymbolEnum.DOGEUSDT, TimePeriodEnum.FIVE_MINUTES, "2024-02-05")
+    df = data_clean(df)
+    print(df.columns)
+    df['RSI'] = compute_rsi(df, window=14)
+    print(df.head(50))
