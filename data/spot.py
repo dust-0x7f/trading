@@ -27,6 +27,13 @@ def download_spot_klines(symbol: SymbolEnum, period: TimePeriodEnum, year, month
     # 格式化 request_url 和 file_name_template
     url = request_url.format(symbol=symbol.value, period=period.value, year=year, month=month, day=day)
     file_name = file_name_template.format(symbol=symbol.value, period=period.value, year=year, month=month, day=day)
+    file_path = os.path.join(os.getcwd(), file_name)  # 获取完整路径
+    file_dir = os.path.dirname(file_path)  # 获取目录路径
+
+    # 如果目录不存在，则创建目录
+    if not os.path.exists(file_dir):
+        os.makedirs(file_dir, exist_ok=True)
+        print(f"Directory {file_dir} created.")
 
     # 判断文件是否已经存在
     if os.path.exists(file_name):
