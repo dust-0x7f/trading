@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 
 class TimePeriodEnum(Enum):
@@ -24,4 +25,7 @@ class SymbolEnum(Enum):
     ADAUSDT = 'ADAUSDT'
     SOLUSDT = 'SOLUSDT'
     BNBUSDT = 'BNBUSDT'
+
+
+project_root = os.path.dirname(os.path.abspath(__file__))
 

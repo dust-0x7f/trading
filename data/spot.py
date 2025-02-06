@@ -5,7 +5,7 @@ import pandas as pd
 import requests
 from pandas import DataFrame
 
-from constants.constants import TimePeriodEnum, SymbolEnum
+from constants import TimePeriodEnum, SymbolEnum, project_root
 from data.indicators import compute_rsi
 
 # 设置全局列名变量
@@ -13,7 +13,10 @@ Spot_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_ti
                 'buy_volume', 'sell_volume', 'ignore']
 
 request_url = "https://data.binance.vision/data/spot/daily/klines/{symbol}/{period}/{symbol}-{period}-{year}-{month}-{day}.zip"
-file_name_template = "./zips/{symbol}-{period}-{year}-{month}-{day}.zip"
+
+# 目标文件夹路径，保存在项目根目录下的 downloads 文件夹
+downloads_folder = os.path.join(project_root, "downloads")
+file_name_template = downloads_folder+"/{symbol}-{period}-{year}-{month}-{day}.zip"
 
 '''
 下载现货k线图
@@ -80,6 +83,9 @@ def get_day_df(symbol: SymbolEnum, period: TimePeriodEnum, time_end: str, window
             raise e
     res = pd.concat(all_data, ignore_index=True)
     res.columns = Spot_columns
+
+    res = pre_data_clean(res)
+    res['rsi'] = compute_rsi(res, window=14)
     return res
 
 
@@ -93,9 +99,4 @@ def pre_data_clean(df: DataFrame) -> DataFrame:
 def post_data_clean(df:DataFrame) -> DataFrame:
     return df
 
-if __name__ == '__main__':
-    df = get_day_df(SymbolEnum.DOGEUSDT, TimePeriodEnum.FIVE_MINUTES, "2024-02-05")
-    df = pre_data_clean(df)
-    print(df.columns)
-    df['RSI'] = compute_rsi(df, window=14)
-    print(df.head(50))
+
