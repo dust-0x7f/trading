@@ -2,10 +2,12 @@
 币圈交易 模型训练
 
 
-安装ta-lib
+安装依赖
 ```commandline
 pip3 install --upgrade -i https://mirrors.aliyun.com/pypi/simple pip
 brew install ta-lib
+brew install swig
+
 pip install Pyrebase4
 pip install ta-lib
 ```
