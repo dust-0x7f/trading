@@ -18,8 +18,8 @@ num_heads = 8  # 注意力头数
 num_layers = 3  # Transformer层数
 output_size = 1  # 预测的目标（如：下一步的收盘价）
 
-used_data_len = 10
-predict_data_len = 2
+used_data_len = 20
+predict_data_len = 3
 
 
 class CryptoEngineer:
@@ -94,7 +94,7 @@ class TransformerModel(nn.Module):
         x = self.transformer(x, x)
 
         # 这里假设模型的输出是(批次, 序列长度, 模型维度)
-        x = x[:, -used_data_len:, :]  # 获取未来n个时间步的输出
+        x = x[:, -predict_data_len:, :]  # 获取未来n个时间步的输出
 
         # 通过输出层映射到最终预测的收盘价
         x = self.output_layer(x)
@@ -102,16 +102,16 @@ class TransformerModel(nn.Module):
         return x
 
 
-def get_train_data(df: DataFrame, used_data_len, predict_data_len):
+def get_train_data(df: DataFrame, past_data_len, predict_data_len):
     X = []
     y = []
     # features = ['SMA', 'RSI', 'BB_upper', 'BB_middle', 'BB_lower', 'MACD', 'MACD_signal', 'MACD_hist']
     features = ['SMA', 'RSI',  'MACD', 'MACD_signal', 'MACD_hist']
     target_column = 'close'  # 预测目标列
 
-    for i in range(used_data_len, len(df) - predict_data_len + 1):  # 从 used_data_len 开始到剩余足够预测数据的位置
-        X.append(df.iloc[i-used_data_len:i][features].values)  # 使用 iloc 索引位置数据
-        y.append(df.iloc[i-used_data_len:i][target_column].values)  # 使用 iloc 索引位置数据
+    for i in range(past_data_len, len(df) - predict_data_len + 1):  # 从 used_data_len 开始到剩余足够预测数据的位置
+        X.append(df.iloc[i - past_data_len:i][features].values)  # 使用 iloc 索引位置数据
+        y.append(df.iloc[i:i + predict_data_len][target_column].values)  # 使用 iloc 索引位置数据
 
     return np.array(X), np.array(y)
 
@@ -139,7 +139,7 @@ def train():
     y_train = torch.tensor(price_array, dtype=torch.float32)
 
     num_epochs = 50
-    criterion = nn.HuberLoss()  # 使用均方误差作为损失函数
+    criterion = nn.HuberLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     y_train = y_train.unsqueeze(-1)  # 在最后一维增加一个维度，使其形状变为 (batch_size, seq_len, 1)
     for epoch in range(1,num_epochs + 1):
@@ -149,7 +149,6 @@ def train():
         # 前向传播
         outputs = model(X_train)  # 模型预测输出
         # 重塑 y_train 使其与 outputs 的形状一致
-
         loss = criterion(outputs, y_train)  # 计算损失
 
         # 反向传播
