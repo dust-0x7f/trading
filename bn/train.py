@@ -6,10 +6,20 @@ import talib
 from binance import Client
 from matplotlib import pyplot as plt
 from pandas import DataFrame
-from sklearn.preprocessing import StandardScaler
 
 from bn import cl
 from constants import SymbolEnum
+
+
+
+input_size = 8  # 输入特征数（例如：开盘价、最高价、最低价、收盘价、成交量等）
+model_dim = 64  # Transformer模型的维度
+num_heads = 8  # 注意力头数
+num_layers = 3  # Transformer层数
+output_size = 1  # 预测的目标（如：下一步的收盘价）
+
+used_data_len = 10
+predict_data_len = 2
 
 
 class CryptoEngineer:
@@ -84,7 +94,7 @@ class TransformerModel(nn.Module):
         x = self.transformer(x, x)
 
         # 这里假设模型的输出是(批次, 序列长度, 模型维度)
-        x = x[:, -10:, :]  # 获取未来5个时间步的输出
+        x = x[:, -predict_data_len:, :]  # 获取未来5个时间步的输出
 
         # 通过输出层映射到最终预测的收盘价
         x = self.output_layer(x)
@@ -106,17 +116,11 @@ def get_train_data(df: DataFrame, used_data_len, predict_data_len):
 
 
 
-input_size = 8  # 输入特征数（例如：开盘价、最高价、最低价、收盘价、成交量等）
-model_dim = 64  # Transformer模型的维度
-num_heads = 8  # 注意力头数
-num_layers = 3  # Transformer层数
-output_size = 1  # 预测的目标（如：下一步的收盘价）
-
 def train():
     engineer = CryptoEngineer()
     df = engineer.get_binance_data("2024-06-05","2024-10-05")
     df = engineer.preprocess_data(df)
-    tech_array, price_array = get_train_data(df,50,10)
+    tech_array, price_array = get_train_data(df,used_data_len,predict_data_len)
 
     # 定义模型的超参数
 
@@ -153,7 +157,7 @@ def train():
 
         # 更新模型参数
         optimizer.step()
-
+        print(f"Epoch :{epoch} done")
         if epoch % 10 == 0:
             torch.save(model.state_dict(), model_path)
             print(f'Epoch [{epoch}/{num_epochs}], Loss: {loss.item():.4f}')
@@ -171,7 +175,7 @@ def test():
         print(f"No saved model found at {model_path}, starting from scratch.")
 
     #  训练完成，回测一下
-    test_data = engineer.get_binance_data("2024-011-06","2024-12-06")
+    test_data = engineer.get_binance_data("2024-11-06","2024-12-06")
     test_data = engineer.preprocess_data(test_data)
     test_tech_array, test_price_array = get_train_data(test_data,50,10)
 
@@ -183,15 +187,14 @@ def test():
     capital_history = [balance]  # 记录资金变化
     sell_idx = -1
 
-    for i in range(0, len(test_price_array) - 9):  # 保证有足够的未来数据来做判断
+    for i in range(0, len(test_price_array)):  # 保证有足够的未来数据来做判断
         input_data = torch.tensor(test_tech_array[i:i + 1], dtype=torch.float32)  # 当前时间步的数据
         with torch.no_grad():
             predict_price = model(input_data)  # 使用模型预测下一步的价格
         predict_price = predict_price.squeeze()
         now_real_price = test_data['close'].iloc[i]
-        next_real_price = test_data['close'].iloc[i + 5]
         # 使用模型预测值和涨幅判断买卖时机
-        predicted_future_return = (predict_price[9] - next_real_price) / next_real_price
+        predicted_future_return = (predict_price[9] - now_real_price) / now_real_price
         if sell_idx == i:
             if positions == 1:
                 positions = 0
@@ -201,14 +204,14 @@ def test():
             print(f"Selling at {sell_price}, Balance: {balance}")
             #  该卖出去了
         if predicted_future_return > 0.10:  # 买入条件
-            if i + 10 < len(test_price_array) - 9:
+            if i + predict_data_len < len(test_price_array):
                 if positions == 0:  # 确保没有持仓
                     positions = 1
                     # 投入20%
                     coin_cnt = balance * 0.2 / now_real_price
                     balance *= 0.8
                     buy_price = now_real_price
-                    sell_idx = i + 10
+                    sell_idx = i + predict_data_len
                     print(f"Buying at {buy_price}, Balance: {balance}")
 
         capital_history.append(balance)  # 更新资金历史
