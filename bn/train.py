@@ -12,7 +12,7 @@ from constants import SymbolEnum
 
 
 
-input_size = 8  # 输入特征数（例如：开盘价、最高价、最低价、收盘价、成交量等）
+input_size = 5  # 输入特征数（例如：开盘价、最高价、最低价、收盘价、成交量等）
 model_dim = 64  # Transformer模型的维度
 num_heads = 8  # 注意力头数
 num_layers = 3  # Transformer层数
@@ -47,7 +47,7 @@ class CryptoEngineer:
         # 添加常见的技术指标
         data['SMA'] = talib.SMA(data['close'], timeperiod=20)  # 20日简单移动平均
         data['RSI'] = talib.RSI(data['close'], timeperiod=14)  # 14日相对强弱指数
-        data['BB_upper'], data['BB_middle'], data['BB_lower'] = talib.BBANDS(data['close'], timeperiod=20)  # 布林带
+        # data['BB_upper'], data['BB_middle'], data['BB_lower'] = talib.BBANDS(data['close'], timeperiod=20)  # 布林带
         data['MACD'], data['MACD_signal'], data['MACD_hist'] = talib.MACD(data['close'], fastperiod=12, slowperiod=26,
                                                                           signalperiod=9)  # MACD
 
@@ -94,7 +94,7 @@ class TransformerModel(nn.Module):
         x = self.transformer(x, x)
 
         # 这里假设模型的输出是(批次, 序列长度, 模型维度)
-        x = x[:, -predict_data_len:, :]  # 获取未来5个时间步的输出
+        x = x[:, -used_data_len:, :]  # 获取未来n个时间步的输出
 
         # 通过输出层映射到最终预测的收盘价
         x = self.output_layer(x)
@@ -105,12 +105,13 @@ class TransformerModel(nn.Module):
 def get_train_data(df: DataFrame, used_data_len, predict_data_len):
     X = []
     y = []
-    features = ['SMA', 'RSI', 'BB_upper', 'BB_middle', 'BB_lower', 'MACD', 'MACD_signal', 'MACD_hist']
+    # features = ['SMA', 'RSI', 'BB_upper', 'BB_middle', 'BB_lower', 'MACD', 'MACD_signal', 'MACD_hist']
+    features = ['SMA', 'RSI',  'MACD', 'MACD_signal', 'MACD_hist']
     target_column = 'close'  # 预测目标列
 
     for i in range(used_data_len, len(df) - predict_data_len + 1):  # 从 used_data_len 开始到剩余足够预测数据的位置
-        X.append(df.iloc[i - used_data_len:i][features].values)  # 使用 iloc 索引位置数据
-        y.append(df.iloc[i:i + predict_data_len][target_column].values)  # 使用 iloc 索引位置数据
+        X.append(df.iloc[i-used_data_len:i][features].values)  # 使用 iloc 索引位置数据
+        y.append(df.iloc[i-used_data_len:i][target_column].values)  # 使用 iloc 索引位置数据
 
     return np.array(X), np.array(y)
 
@@ -138,7 +139,7 @@ def train():
     y_train = torch.tensor(price_array, dtype=torch.float32)
 
     num_epochs = 50
-    criterion = nn.MSELoss()  # 使用均方误差作为损失函数
+    criterion = nn.HuberLoss()  # 使用均方误差作为损失函数
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     y_train = y_train.unsqueeze(-1)  # 在最后一维增加一个维度，使其形状变为 (batch_size, seq_len, 1)
     for epoch in range(1,num_epochs + 1):
@@ -149,7 +150,6 @@ def train():
         outputs = model(X_train)  # 模型预测输出
         # 重塑 y_train 使其与 outputs 的形状一致
 
-
         loss = criterion(outputs, y_train)  # 计算损失
 
         # 反向传播
@@ -157,7 +157,6 @@ def train():
 
         # 更新模型参数
         optimizer.step()
-        print(f"Epoch :{epoch} done")
         if epoch % 10 == 0:
             torch.save(model.state_dict(), model_path)
             print(f'Epoch [{epoch}/{num_epochs}], Loss: {loss.item():.4f}')
@@ -186,24 +185,25 @@ def test():
     coin_cnt = 0
     capital_history = [balance]  # 记录资金变化
     sell_idx = -1
-
-    for i in range(0, len(test_price_array)):  # 保证有足够的未来数据来做判断
+    p_price = -1
+    for i in range(used_data_len, len(test_price_array)):  # 保证有足够的未来数据来做判断
         input_data = torch.tensor(test_tech_array[i:i + 1], dtype=torch.float32)  # 当前时间步的数据
         with torch.no_grad():
             predict_price = model(input_data)  # 使用模型预测下一步的价格
         predict_price = predict_price.squeeze()
         now_real_price = test_data['close'].iloc[i]
+        predict_price = predict_price[predict_data_len - 1]
         # 使用模型预测值和涨幅判断买卖时机
-        predicted_future_return = (predict_price[9] - now_real_price) / now_real_price
+        predicted_future_return = (predict_price - now_real_price) / now_real_price
         if sell_idx == i:
             if positions == 1:
                 positions = 0
             balance += coin_cnt * now_real_price
             sell_price = now_real_price
             coin_cnt = 0
-            print(f"Selling at {sell_price}, Balance: {balance}")
+            print(f"Selling at {sell_price},Predict Price {p_price}, Balance: {balance}")
             #  该卖出去了
-        if predicted_future_return > 0.10:  # 买入条件
+        if predicted_future_return > 0.05:  # 买入条件
             if i + predict_data_len < len(test_price_array):
                 if positions == 0:  # 确保没有持仓
                     positions = 1
@@ -211,6 +211,7 @@ def test():
                     coin_cnt = balance * 0.2 / now_real_price
                     balance *= 0.8
                     buy_price = now_real_price
+                    p_price = predict_price
                     sell_idx = i + predict_data_len
                     print(f"Buying at {buy_price}, Balance: {balance}")
 
