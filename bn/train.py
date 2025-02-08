@@ -143,7 +143,7 @@ def train():
     train_dataset = TensorDataset(X_train, y_train)
     train_loader = DataLoader(train_dataset, batch_size=512)
 
-    num_epochs = 20
+    num_epochs = 10
     criterion = nn.HuberLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     for epoch in range(num_epochs):
@@ -182,42 +182,13 @@ def test():
     max_balance = 0
     initial_balance = 10000  # 初始资金
     balance = initial_balance
-    positions = 0  # 当前持仓数
-    coin_cnt = 0
-    capital_history = [balance]  # 记录资金变化
-    sell_idx = -1
-    p_price = -1
     for i in range(past_data_len, len(test_price_array)):  # 保证有足够的未来数据来做判断
         input_data = torch.tensor(test_tech_array[i:i + 1], dtype=torch.float32)  # 当前时间步的数据
         with torch.no_grad():
             predict_price = model(input_data)  # 使用模型预测下一步的价格
         predict_price = predict_price.squeeze()
-        now_real_price = test_data['close'].iloc[i]
-        predict_price = predict_price[predict_data_len - 1]
-        # 使用模型预测值和涨幅判断买卖时机
-        predicted_future_return = (predict_price - now_real_price) / now_real_price
-        if sell_idx == i:
-            if positions == 1:
-                positions = 0
-            balance += coin_cnt * now_real_price
-            sell_price = now_real_price
-            coin_cnt = 0
-            print(f"Selling at {sell_price},Predict Price {p_price}, Balance: {balance}")
-            #  该卖出去了
-        if predicted_future_return > 0.05:  # 买入条件
-            if i + predict_data_len < len(test_price_array):
-                if positions == 0:  # 确保没有持仓
-                    positions = 1
-                    # 投入20%
-                    coin_cnt = balance * 0.2 / now_real_price
-                    balance *= 0.8
-                    buy_price = now_real_price
-                    p_price = predict_price
-                    sell_idx = i + predict_data_len
-                    print(f"Buying at {buy_price}, Balance: {balance}")
-
-        capital_history.append(balance)  # 更新资金历史
-        max_balance = max(max_balance,balance)
+        v = test_price_array[i + predict_data_len][-1]
+        print(f'prefict_price: {predict_price[-1]},real_price: {v}')
 
     # 7. 计算回测结果
     final_balance = balance
@@ -237,5 +208,5 @@ def test():
 
 
 if __name__ == '__main__':
-    train()
-    # test()
+    # train()
+    test()
