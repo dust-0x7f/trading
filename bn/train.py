@@ -6,6 +6,7 @@ import talib
 from binance import Client
 from matplotlib import pyplot as plt
 from pandas import DataFrame
+from torch.utils.data import DataLoader, TensorDataset
 
 from bn import cl
 from constants import SymbolEnum
@@ -18,7 +19,7 @@ num_heads = 8  # 注意力头数
 num_layers = 3  # Transformer层数
 output_size = 1  # 预测的目标（如：下一步的收盘价）
 
-used_data_len = 20
+past_data_len = 20
 predict_data_len = 3
 
 
@@ -121,7 +122,7 @@ def train():
     engineer = CryptoEngineer()
     df = engineer.get_binance_data("2024-06-05","2024-10-05")
     df = engineer.preprocess_data(df)
-    tech_array, price_array = get_train_data(df,used_data_len,predict_data_len)
+    tech_array, price_array = get_train_data(df, past_data_len, predict_data_len)
 
     # 定义模型的超参数
 
@@ -135,30 +136,31 @@ def train():
     else:
         print(f"No saved model found at {model_path}, starting from scratch.")
 
+
     X_train = torch.tensor(tech_array, dtype=torch.float32)
     y_train = torch.tensor(price_array, dtype=torch.float32)
+    y_train = y_train.unsqueeze(-1)  # 在最后一维增加一个维度，使其形状变为 (batch_size, seq_len, 1)
+    train_dataset = TensorDataset(X_train, y_train)
+    train_loader = DataLoader(train_dataset, batch_size=512)
 
-    num_epochs = 50
+    num_epochs = 20
     criterion = nn.HuberLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    y_train = y_train.unsqueeze(-1)  # 在最后一维增加一个维度，使其形状变为 (batch_size, seq_len, 1)
-    for epoch in range(1,num_epochs + 1):
-        model.train()
-        optimizer.zero_grad()  # 清除之前的梯度
+    for epoch in range(num_epochs):
+        model.train()  # 设置模型为训练模式
+        for batch_idx, (inputs, targets) in enumerate(train_loader):
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
 
-        # 前向传播
-        outputs = model(X_train)  # 模型预测输出
-        # 重塑 y_train 使其与 outputs 的形状一致
-        loss = criterion(outputs, y_train)  # 计算损失
+        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}")
 
-        # 反向传播
-        loss.backward()
-
-        # 更新模型参数
-        optimizer.step()
-        if epoch % 10 == 0:
+        # 每10个epoch保存一次模型
+        if (epoch + 1) % 10 == 0:
             torch.save(model.state_dict(), model_path)
-            print(f'Epoch [{epoch}/{num_epochs}], Loss: {loss.item():.4f}')
+            print(f"Model saved at epoch {epoch + 1}")
 
 
 def test():
@@ -175,7 +177,7 @@ def test():
     #  训练完成，回测一下
     test_data = engineer.get_binance_data("2024-11-06","2024-12-06")
     test_data = engineer.preprocess_data(test_data)
-    test_tech_array, test_price_array = get_train_data(test_data,50,10)
+    test_tech_array, test_price_array = get_train_data(test_data, past_data_len, predict_data_len)
 
     max_balance = 0
     initial_balance = 10000  # 初始资金
@@ -185,7 +187,7 @@ def test():
     capital_history = [balance]  # 记录资金变化
     sell_idx = -1
     p_price = -1
-    for i in range(used_data_len, len(test_price_array)):  # 保证有足够的未来数据来做判断
+    for i in range(past_data_len, len(test_price_array)):  # 保证有足够的未来数据来做判断
         input_data = torch.tensor(test_tech_array[i:i + 1], dtype=torch.float32)  # 当前时间步的数据
         with torch.no_grad():
             predict_price = model(input_data)  # 使用模型预测下一步的价格
@@ -218,7 +220,7 @@ def test():
         max_balance = max(max_balance,balance)
 
     # 7. 计算回测结果
-    final_balance = balance + positions * test_data['close'].iloc[-1]
+    final_balance = balance
     profit = final_balance - initial_balance
     print(f"Final Balance: {final_balance}")
     print(f"Total Profit: {profit}")
